@@ -1,0 +1,9 @@
+# The .xcodeproj is generated from project.yml (make gen); not versioned.
+*.xcodeproj
+build/
+.DS_Store
+
+# Real VPN configs live in ~/.config/vpn-switcher, never in the repo.
+# Safety net in case one is copied here by mistake:
+profiles.yaml
+*.conf

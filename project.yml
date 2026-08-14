@@ -1,0 +1,65 @@
+name: VPNSwitcher
+options:
+  bundleIdPrefix: es.resiz
+  deploymentTarget:
+    macOS: "15.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    CODE_SIGN_STYLE: Automatic
+    # Sin cuenta de desarrollador configurada aún: firma ad-hoc (ver Pocket).
+    CODE_SIGN_IDENTITY: "-"
+
+targets:
+  VPNSwitcher:
+    type: application
+    platform: macOS
+    sources:
+      - VPNSwitcher
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: es.resiz.vpnswitcher
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        # Sin sandbox: la app ejecuta binarios externos (tailscale, wg-quick)
+        # y lee ~/.config/vpn-switcher. Utilidad personal sin App Store.
+        ENABLE_APP_SANDBOX: false
+        ENABLE_HARDENED_RUNTIME: false
+    info:
+      path: VPNSwitcher/Info.plist
+      properties:
+        CFBundleDisplayName: VPN Switcher
+        CFBundleShortVersionString: "0.1"
+        CFBundleVersion: "1"
+        LSUIElement: true
+        LSMinimumSystemVersion: "15.0"
+
+  # Tests independientes (sin TEST_HOST): compilan la lógica pura directamente,
+  # así no hace falta lanzar la app de barra de menús para testear.
+  VPNSwitcherTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - VPNSwitcherTests
+      - VPNSwitcher/Core/Profile.swift
+      - VPNSwitcher/Core/ProfilesConfig.swift
+      - VPNSwitcher/Core/ConfigLoader.swift
+      - VPNSwitcher/Core/Hotkey.swift
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+
+schemes:
+  VPNSwitcher:
+    build:
+      targets:
+        VPNSwitcher: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      gatherCoverageData: false
+      targets:
+        - VPNSwitcherTests
