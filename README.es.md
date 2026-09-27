@@ -216,7 +216,9 @@ El `.xcodeproj` no se versiona: la definición del proyecto vive en
   un actor (`SwitchEngine`) que sondea y ejecuta, y un `AppState` observable
   en el MainActor como única fuente de verdad de la UI.
 - **Cero dependencias de paquetes**: el YAML lo parsea un parser propio del
-  subconjunto necesario (`ProfilesConfigParser`, testeado).
+  subconjunto necesario (`ProfilesConfigParser`, testeado). Comillas dobles
+  desescaparán `\"` / `\\`; simples, `''` → `'`. No hay escalares folded
+  (`>` / `|`) — un valor por línea.
 - **Sin App Sandbox**: la app ejecuta binarios externos y lee `~/.config`.
 - **El switch sobrevive al menú**: la activación corre en un Task del actor,
   no de la vista — cerrar el menú a mitad no aborta el cambio a medias.

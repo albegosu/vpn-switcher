@@ -211,8 +211,12 @@ you). See [CONTRIBUTING.md](CONTRIBUTING.md) for how to add a provider.
 - **A switch survives the menu closing**: activation runs in an actor `Task`,
   not the view's, so dismissing the menu mid-switch doesn't abort it.
 - **Subset YAML parser**: scalar top-level keys + a `profiles:` list of flat
-  maps, with comments and quotes. Unknown keys are ignored (forward
-  compatibility). If full YAML is ever needed, only the parser changes.
+  maps, with comments and quotes. Double-quoted values unescape `\"` → `"`
+  and `\\` → `\`; single-quoted values map YAML `''` → `'`. Folded/literal
+  block scalars (`>` / `|`) are **not** supported — keep each value on one
+  line (the parser fails closed with `invalidLine`). Unknown keys are
+  ignored (forward compatibility). If full YAML is ever needed, only the
+  parser changes.
 
 ## Status
 
