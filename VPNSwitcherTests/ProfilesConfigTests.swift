@@ -158,10 +158,10 @@ struct ProfilesConfigTests {
         profiles:
           - name: X
             provider: wireguard
-            activate_cmd: "grep -q \"#tag\" /tmp/f" # trailing comment
+            activate_cmd: "grep -q \"foo #bar\" /tmp/f" # trailing comment
             status_cmd: s
         """#)
-        #expect(config.profiles[0].activateCmd == ##"grep -q "#tag" /tmp/f"##)
+        #expect(config.profiles[0].activateCmd == ##"grep -q "foo #bar" /tmp/f"##)
     }
 
     @Test func foldedAndLiteralScalarsRejected() {

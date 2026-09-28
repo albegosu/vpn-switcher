@@ -27,7 +27,7 @@ enum ProfilesConfigError: Error, Equatable, LocalizedError {
         case .missingField(let profile, let field):
             "Profile \"\(profile)\" is missing required field `\(field)`"
         case .invalidLine(let line, let content):
-            "Cannot parse line \(line): \(content) — subset YAML only (no folded/literal scalars `>` / `|`; use a single-line value)"
+            "Cannot parse line \(line): \(content)"
         case .invalidHotkey(let context, let value):
             "Invalid hotkey \"\(value)\" for \(context) — use modifiers+key, e.g. cmd+opt+1"
         }
@@ -192,10 +192,10 @@ enum ProfilesConfigParser {
     }
 
     /// Detecta indicadores de block scalar YAML (`>`, `|`, `|-`, `>+`, `>2`…).
-    /// Solo aplica a valores sin comillas; `">"` / `'>'` son literales válidos.
+    /// Un valor entrecomillado empieza por `"` o `'`, así que `">"` / `'|'`
+    /// no entran aquí y siguen siendo literales.
     private static func isUnsupportedBlockScalar(_ raw: String) -> Bool {
         guard let first = raw.first, first == ">" || first == "|" else { return false }
-        if raw.hasPrefix("\"") || raw.hasPrefix("'") { return false }
         // YAML 1.2: optional chomping (+/-) and/or indentation digits, either order.
         let rest = raw.dropFirst()
         if rest.isEmpty { return true }
