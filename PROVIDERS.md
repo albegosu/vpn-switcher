@@ -157,6 +157,56 @@ connected keyword, as in the examples above.
 
 ---
 
+## UniFi Teleport / Network Extension async 🧪
+
+UniFi Teleport (and other Network Extension–backed tunnels driven via
+`scutil --nc` or a vendor helper) often report **Connecting** for a while
+before they reach **Connected**. Two workable patterns:
+
+1. **Wait inside `activate_cmd`** until status is Connected (preferred when
+   you need the switch to finish only when the tunnel is actually up), e.g.
+   poll `scutil --nc status "…"` in a short shell loop with a timeout; or
+2. **Accept poll lag** — let `activate_cmd` return after kicking off the
+   connect, and rely on `status_cmd` + `poll_interval` to flip the ✓ once
+   the NE reports Connected. The row may briefly look inactive after a
+   successful activate; that is expected.
+
+Use the same exit-code contract as every other recipe (`status_cmd` exit 0
+only when fully Connected).
+
+```yaml
+- name: UniFi Teleport
+  provider: unifi
+  activate_cmd: scutil --nc start "Teleport" && for i in 1 2 3 4 5 6 7 8 9 10; do scutil --nc status "Teleport" | head -1 | grep -qx Connected && exit 0; sleep 1; done; exit 1
+  deactivate_cmd: scutil --nc stop "Teleport"
+  status_cmd: scutil --nc status "Teleport" | head -1 | grep -qx Connected
+```
+
+Adjust the service name to whatever `scutil --nc list` shows. Drop the wait
+loop if you prefer option 2.
+
+## ExpressVPN (Lightway via expressvpnctl) 🧪
+
+ExpressVPN's CLI (`expressvpnctl` / legacy `expressvpn`) drives the
+**Lightway** client — it is **not** the System Settings IKEv2/IPsec service.
+Do not mix `scutil --nc` recipes meant for a macOS Network preference VPN
+with ExpressVPN's own daemon. Use the vendor CLI end-to-end:
+
+```yaml
+- name: ExpressVPN
+  provider: expressvpn
+  activate_cmd: expressvpnctl connect
+  deactivate_cmd: expressvpnctl disconnect
+  status_cmd: expressvpnctl status | grep -qi connected
+```
+
+Exact subcommands vary by app version (`expressvpnctl status` vs
+`expressvpn status`); confirm with `--help` on your install. If you also
+have a separate IKEv2 profile in System Settings, give it its own
+`scutil --nc` profile — that path is unrelated to Lightway.
+
+---
+
 ## Writing your own
 
 If your VPN can be started, stopped and queried from the command line (or via
@@ -172,7 +222,7 @@ If your VPN can be started, stopped and queried from the command line (or via
    "one VPN at a time" exclusivity and in "Disconnect all".
 4. Pick a `provider:` string — it only groups profiles in the menu. Known
    values (`tailscale`, `wireguard`, `ipsec`, `mullvad`, `cloudflare`,
-   `openvpn`) get a friendly name and icon; anything else falls back to a
+   `openvpn`, …) get a friendly name and icon when known; anything else falls back to a
    capitalised name and a generic network icon.
 
 Got a recipe working for a provider not listed here? PRs to this file are

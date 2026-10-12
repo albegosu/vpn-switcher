@@ -128,6 +128,86 @@ struct ProfilesConfigTests {
         #expect(groups[0].profiles.map(\.name) == ["W1", "W2"])
         #expect(groups[1].displayName == "Tailscale")
     }
+
+    @Test func doubleQuotedUnescapesBackslashAndQuote() throws {
+        let config = try ProfilesConfigParser.parse(#"""
+        profiles:
+          - name: "Say \"hi\""
+            provider: wireguard
+            activate_cmd: "echo \\path\\"
+            status_cmd: s
+        """#)
+        #expect(config.profiles[0].name == #"Say "hi""#)
+        #expect(config.profiles[0].activateCmd == #"echo \path\"#)
+    }
+
+    @Test func singleQuotedDoubledQuoteBecomesOne() throws {
+        let config = try ProfilesConfigParser.parse("""
+        profiles:
+          - name: 'It''s fine'
+            provider: wireguard
+            activate_cmd: 'echo ''quoted'''
+            status_cmd: s
+        """)
+        #expect(config.profiles[0].name == "It's fine")
+        #expect(config.profiles[0].activateCmd == "echo 'quoted'")
+    }
+
+    @Test func commentAfterEscapedDoubleQuoteStaysIntact() throws {
+        let config = try ProfilesConfigParser.parse(#"""
+        profiles:
+          - name: X
+            provider: wireguard
+            activate_cmd: "grep -q \"foo #bar\" /tmp/f" # trailing comment
+            status_cmd: s
+        """#)
+        #expect(config.profiles[0].activateCmd == ##"grep -q "foo #bar" /tmp/f"##)
+    }
+
+    @Test func foldedAndLiteralScalarsRejected() {
+        #expect {
+            try ProfilesConfigParser.parse("""
+            profiles:
+              - name: X
+                provider: wireguard
+                activate_cmd: >
+                  echo multiline
+                status_cmd: s
+            """)
+        } throws: { error in
+            guard let err = error as? ProfilesConfigError,
+                  case .invalidLine(let line, let content) = err else { return false }
+            #expect(line == 4)
+            return content.contains(">") && content.contains("unsupported")
+        }
+
+        #expect {
+            try ProfilesConfigParser.parse("""
+            profiles:
+              - name: X
+                provider: wireguard
+                activate_cmd: |-
+                status_cmd: s
+            """)
+        } throws: { error in
+            guard let err = error as? ProfilesConfigError,
+                  case .invalidLine(_, let content) = err else { return false }
+            return content.contains("|") && content.contains("unsupported")
+        }
+    }
+
+    @Test func quotedBlockIndicatorIsLiteralNotRejected() throws {
+        let config = try ProfilesConfigParser.parse("""
+        profiles:
+          - name: X
+            provider: wireguard
+            activate_cmd: ">"
+            status_cmd: "|"
+        """)
+        #expect(config.profiles[0].activateCmd == ">")
+        #expect(config.profiles[0].statusCmd == "|")
+    }
+
 }
 
 @Suite("Hotkey")

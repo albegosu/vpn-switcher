@@ -37,8 +37,10 @@ enum ProfilesConfigError: Error, Equatable, LocalizedError {
 /// Parser del subconjunto de YAML que usa profiles.yaml: claves top-level
 /// escalares y una lista `profiles:` de mapas planos. Sin dependencias
 /// externas a propósito (misma filosofía que Pocket: cero paquetes).
-/// Soporta comentarios (#), valores entrecomillados y claves desconocidas
-/// (se ignoran, para compatibilidad hacia delante).
+/// Soporta comentarios (#), valores entrecomillados (doble: `\"` / `\\`;
+/// simple: `''` → `'`) y claves desconocidas (se ignoran, para
+/// compatibilidad hacia delante). No soporta escalares multilínea / folded
+/// (`>` / `|`) — usar un valor en una sola línea.
 enum ProfilesConfigParser {
     static func parse(_ text: String) throws -> ProfilesConfig {
         var pollInterval = ProfilesConfig.defaultPollInterval
@@ -69,7 +71,7 @@ enum ProfilesConfigParser {
                     continue
                 }
                 inProfiles = false
-                guard let (key, value) = keyValue(trimmed) else {
+                guard let (key, value) = try keyValue(trimmed, line: lineNumber) else {
                     throw ProfilesConfigError.invalidLine(line: lineNumber, content: trimmed)
                 }
                 if key == "poll_interval", let seconds = TimeInterval(value), seconds >= 1 {
@@ -112,7 +114,7 @@ enum ProfilesConfigParser {
                 currentFirstLine = lineNumber
                 content = String(content.dropFirst(2)).trimmingCharacters(in: .whitespaces)
             }
-            guard current != nil, let (key, value) = keyValue(content) else {
+            guard current != nil, let (key, value) = try keyValue(content, line: lineNumber) else {
                 throw ProfilesConfigError.invalidLine(line: lineNumber, content: trimmed)
             }
             current?[key] = value
@@ -160,12 +162,20 @@ enum ProfilesConfigParser {
     /// Separa "key: value" en la primera aparición de ": " (o ":" final).
     /// Los dos puntos posteriores quedan dentro del valor, así los comandos
     /// con URLs o `sh -c 'a: b'` no se rompen.
-    private static func keyValue(_ text: String) -> (key: String, value: String)? {
+    /// Lanza `invalidLine` si el valor es un indicador de escalar folded/literal
+    /// (`>` / `|`), no soportado por este subconjunto.
+    private static func keyValue(_ text: String, line: Int) throws -> (key: String, value: String)? {
         if let range = text.range(of: ": ") {
             let key = String(text[..<range.lowerBound]).trimmingCharacters(in: .whitespaces)
-            let value = String(text[range.upperBound...]).trimmingCharacters(in: .whitespaces)
+            let raw = String(text[range.upperBound...]).trimmingCharacters(in: .whitespaces)
             guard isPlainKey(key) else { return nil }
-            return (key, unquote(value))
+            if isUnsupportedBlockScalar(raw) {
+                throw ProfilesConfigError.invalidLine(
+                    line: line,
+                    content: "\(text) — folded/literal scalars (`>` / `|`) are unsupported; use a single-line value"
+                )
+            }
+            return (key, unquote(raw))
         }
         if text.hasSuffix(":") {
             let key = String(text.dropLast()).trimmingCharacters(in: .whitespaces)
@@ -181,17 +191,50 @@ enum ProfilesConfigParser {
         !key.isEmpty && key.allSatisfy { $0.isLetter || $0.isNumber || $0 == "_" || $0 == "-" }
     }
 
+    /// Detecta indicadores de block scalar YAML (`>`, `|`, `|-`, `>+`, `>2`…).
+    /// Un valor entrecomillado empieza por `"` o `'`, así que `">"` / `'|'`
+    /// no entran aquí y siguen siendo literales.
+    private static func isUnsupportedBlockScalar(_ raw: String) -> Bool {
+        guard let first = raw.first, first == ">" || first == "|" else { return false }
+        // YAML 1.2: optional chomping (+/-) and/or indentation digits, either order.
+        let rest = raw.dropFirst()
+        if rest.isEmpty { return true }
+        let ok = rest.allSatisfy { $0 == "+" || $0 == "-" || $0.isNumber }
+        return ok && rest.filter({ $0 == "+" || $0 == "-" }).count <= 1
+    }
+
     /// Quita un comentario `#` fuera de comillas. Regla YAML: el `#` abre
-    /// comentario solo al inicio o precedido de espacio.
+    /// comentario solo al inicio o precedido de espacio. Dentro de dobles
+    /// comillas, `\"` y `\\` no cierran / no escapan mal el estado.
     private static func stripComment(_ line: String) -> String {
         var inSingle = false
         var inDouble = false
         var previous: Character?
-        for index in line.indices {
+        var index = line.startIndex
+        while index < line.endIndex {
             let char = line[index]
+            if inDouble && char == "\\" {
+                let next = line.index(after: index)
+                if next < line.endIndex {
+                    previous = line[next]
+                    index = line.index(after: next)
+                    continue
+                }
+            }
             switch char {
-            case "'" where !inDouble: inSingle.toggle()
-            case "\"" where !inSingle: inDouble.toggle()
+            case "'" where !inDouble:
+                if inSingle {
+                    // YAML '' inside single-quoted: stay in single quotes.
+                    let next = line.index(after: index)
+                    if next < line.endIndex, line[next] == "'" {
+                        previous = "'"
+                        index = line.index(after: next)
+                        continue
+                    }
+                }
+                inSingle.toggle()
+            case "\"" where !inSingle:
+                inDouble.toggle()
             case "#" where !inSingle && !inDouble:
                 if previous == nil || previous == " " {
                     return String(line[..<index])
@@ -199,16 +242,52 @@ enum ProfilesConfigParser {
             default: break
             }
             previous = char
+            index = line.index(after: index)
         }
         return line
     }
 
+    /// Quita comillas externas y aplica escapes del subconjunto YAML:
+    /// - Doble: `\"` → `"`, `\\` → `\`
+    /// - Simple: `''` → `'` (único escape en single-quoted YAML)
     private static func unquote(_ value: String) -> String {
         guard value.count >= 2 else { return value }
-        if (value.hasPrefix("\"") && value.hasSuffix("\""))
-            || (value.hasPrefix("'") && value.hasSuffix("'")) {
+        if value.hasPrefix("\"") && value.hasSuffix("\"") {
+            return unescapeDoubleQuoted(String(value.dropFirst().dropLast()))
+        }
+        if value.hasPrefix("'") && value.hasSuffix("'") {
             return String(value.dropFirst().dropLast())
+                .replacingOccurrences(of: "''", with: "'")
         }
         return value
+    }
+
+    private static func unescapeDoubleQuoted(_ text: String) -> String {
+        var result = String()
+        result.reserveCapacity(text.count)
+        var index = text.startIndex
+        while index < text.endIndex {
+            let char = text[index]
+            if char == "\\" {
+                let next = text.index(after: index)
+                if next < text.endIndex {
+                    let escaped = text[next]
+                    switch escaped {
+                    case "\\", "\"":
+                        result.append(escaped)
+                        index = text.index(after: next)
+                        continue
+                    default:
+                        // Solo soportamos \\ y \"; el resto se deja literal.
+                        result.append(char)
+                        index = next
+                        continue
+                    }
+                }
+            }
+            result.append(char)
+            index = text.index(after: index)
+        }
+        return result
     }
 }
