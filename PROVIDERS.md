@@ -197,11 +197,18 @@ with ExpressVPN's own daemon. Use the vendor CLI end-to-end:
   provider: expressvpn
   activate_cmd: expressvpnctl connect
   deactivate_cmd: expressvpnctl disconnect
-  status_cmd: expressvpnctl status | grep -qi connected
+  status_cmd: expressvpnctl get connectionstate | grep -qx Connected
 ```
 
-Exact subcommands vary by app version (`expressvpnctl status` vs
-`expressvpn status`); confirm with `--help` on your install. If you also
+`get connectionstate` prints a single state word (`Connected`,
+`Connecting`, `Reconnecting`, `Disconnecting`, `Disconnected`, …). Match
+`Connected` exactly: a substring match like `grep -i connected` also hits
+`Disconnected` (or "Not connected"), so the ✓ would stay on while the
+tunnel is down. `-x` (whole line) still matches if an update banner is
+printed on a line above the state.
+
+Exact subcommands vary by app version; confirm with `--help` on your
+install (older builds used `expressvpn status`). If you also
 have a separate IKEv2 profile in System Settings, give it its own
 `scutil --nc` profile — that path is unrelated to Lightway.
 
